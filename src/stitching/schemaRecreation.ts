@@ -14,17 +14,15 @@ import {
   GraphQLInputObjectType,
   GraphQLInterfaceType,
   GraphQLObjectType,
-  GraphQLSchema,
   GraphQLUnionType,
 } from 'graphql';
-import TypeRegistry from './TypeRegistry';
+import { ResolveType } from '../Interfaces';
 import resolveFromParentTypename from './resolveFromParentTypename';
 import defaultMergedResolver from './defaultMergedResolver';
 
 export function recreateCompositeType(
-  schema: GraphQLSchema,
   type: GraphQLCompositeType | GraphQLInputObjectType,
-  registry: TypeRegistry,
+  resolveType: ResolveType<any>,
 ): GraphQLCompositeType | GraphQLInputObjectType {
   if (type instanceof GraphQLObjectType) {
     const fields = type.getFields();
@@ -33,9 +31,8 @@ export function recreateCompositeType(
     return new GraphQLObjectType({
       name: type.name,
       description: type.description,
-      isTypeOf: type.isTypeOf,
-      fields: () => fieldMapToFieldConfigMap(fields, registry),
-      interfaces: () => interfaces.map(iface => registry.resolveType(iface)),
+      fields: () => fieldMapToFieldConfigMap(fields, resolveType),
+      interfaces: () => interfaces.map(iface => resolveType(iface)),
     });
   } else if (type instanceof GraphQLInterfaceType) {
     const fields = type.getFields();
@@ -43,7 +40,7 @@ export function recreateCompositeType(
     return new GraphQLInterfaceType({
       name: type.name,
       description: type.description,
-      fields: () => fieldMapToFieldConfigMap(fields, registry),
+      fields: () => fieldMapToFieldConfigMap(fields, resolveType),
       resolveType: (parent, context, info) =>
         resolveFromParentTypename(parent, info.schema),
     });
@@ -51,8 +48,7 @@ export function recreateCompositeType(
     return new GraphQLUnionType({
       name: type.name,
       description: type.description,
-      types: () =>
-        type.getTypes().map(unionMember => registry.resolveType(unionMember)),
+      types: () => type.getTypes().map(unionMember => resolveType(unionMember)),
       resolveType: (parent, context, info) =>
         resolveFromParentTypename(parent, info.schema),
     });
@@ -60,7 +56,8 @@ export function recreateCompositeType(
     return new GraphQLInputObjectType({
       name: type.name,
       description: type.description,
-      fields: () => inputFieldMapToFieldConfigMap(type.getFields(), registry),
+      fields: () =>
+        inputFieldMapToFieldConfigMap(type.getFields(), resolveType),
     });
   } else {
     throw new Error(`Invalid type ${type}`);
@@ -69,22 +66,26 @@ export function recreateCompositeType(
 
 export function fieldMapToFieldConfigMap(
   fields: GraphQLFieldMap<any, any>,
-  registry: TypeRegistry,
+  resolveType: ResolveType<any>,
 ): GraphQLFieldConfigMap<any, any> {
   const result: GraphQLFieldConfigMap<any, any> = {};
   Object.keys(fields).forEach(name => {
-    result[name] = fieldToFieldConfig(fields[name], registry);
+    const field = fields[name];
+    const type = resolveType(field.type);
+    if (type !== null) {
+      result[name] = fieldToFieldConfig(fields[name], resolveType);
+    }
   });
   return result;
 }
 
 function fieldToFieldConfig(
   field: GraphQLField<any, any>,
-  registry: TypeRegistry,
+  resolveType: ResolveType<any>,
 ): GraphQLFieldConfig<any, any> {
   return {
-    type: registry.resolveType(field.type),
-    args: argsToFieldConfigArgumentMap(field.args, registry),
+    type: resolveType(field.type),
+    args: argsToFieldConfigArgumentMap(field.args, resolveType),
     resolve: defaultMergedResolver,
     description: field.description,
     deprecationReason: field.deprecationReason,
@@ -93,11 +94,11 @@ function fieldToFieldConfig(
 
 function argsToFieldConfigArgumentMap(
   args: Array<GraphQLArgument>,
-  registry: TypeRegistry,
+  resolveType: ResolveType<any>,
 ): GraphQLFieldConfigArgumentMap {
   const result: GraphQLFieldConfigArgumentMap = {};
   args.forEach(arg => {
-    const [name, def] = argumentToArgumentConfig(arg, registry);
+    const [name, def] = argumentToArgumentConfig(arg, resolveType);
     result[name] = def;
   });
   return result;
@@ -105,12 +106,12 @@ function argsToFieldConfigArgumentMap(
 
 function argumentToArgumentConfig(
   argument: GraphQLArgument,
-  registry: TypeRegistry,
+  resolveType: ResolveType<any>,
 ): [string, GraphQLArgumentConfig] {
   return [
     argument.name,
     {
-      type: registry.resolveType(argument.type),
+      type: resolveType(argument.type),
       defaultValue: argument.defaultValue,
       description: argument.description,
     },
@@ -119,21 +120,25 @@ function argumentToArgumentConfig(
 
 function inputFieldMapToFieldConfigMap(
   fields: GraphQLInputFieldMap,
-  registry: TypeRegistry,
+  resolveType: ResolveType<any>,
 ): GraphQLInputFieldConfigMap {
   const result: GraphQLInputFieldConfigMap = {};
   Object.keys(fields).forEach(name => {
-    result[name] = inputFieldToFieldConfig(fields[name], registry);
+    const field = fields[name];
+    const type = resolveType(field.type);
+    if (type !== null) {
+      result[name] = inputFieldToFieldConfig(fields[name], resolveType);
+    }
   });
   return result;
 }
 
 function inputFieldToFieldConfig(
   field: GraphQLInputField,
-  registry: TypeRegistry,
+  resolveType: ResolveType<any>,
 ): GraphQLInputFieldConfig {
   return {
-    type: registry.resolveType(field.type),
+    type: resolveType(field.type),
     defaultValue: field.defaultValue,
     description: field.description,
   };

@@ -10,6 +10,7 @@ import {
   parse,
   ExecutionResult,
 } from 'graphql';
+import { VisitType } from '../Interfaces';
 import mergeSchemas from '../stitching/mergeSchemas';
 import {
   propertySchema as localPropertySchema,
@@ -124,12 +125,30 @@ testCombinations.forEach(async combination => {
 
       mergedSchema = mergeSchemas({
         schemas: [
-          propertySchema,
-          bookingSchema,
-          scalarTest,
-          enumTest,
-          linkSchema,
-          localSubscriptionSchema,
+          {
+            name: 'Property',
+            schema: propertySchema,
+          },
+          {
+            name: 'Booking',
+            schema: bookingSchema,
+          },
+          {
+            name: 'ScalarTest',
+            schema: scalarTest,
+          },
+          {
+            name: 'EnumTest',
+            schema: enumTest,
+          },
+          {
+            name: 'LinkSchema',
+            schema: linkSchema,
+          },
+          {
+            name: 'LocalSubscription',
+            schema: localSubscriptionSchema,
+          },
         ],
         resolvers: {
           TestScalar: new GraphQLScalarType({
@@ -147,6 +166,7 @@ testCombinations.forEach(async combination => {
               fragment: 'fragment PropertyFragment on Property { id }',
               resolve(parent, args, context, info) {
                 return info.mergeInfo.delegate(
+                  'Booking',
                   'query',
                   'bookingsByPropertyId',
                   {
@@ -164,6 +184,7 @@ testCombinations.forEach(async combination => {
               fragment: 'fragment BookingFragment on Booking { propertyId }',
               resolve(parent, args, context, info) {
                 return info.mergeInfo.delegate(
+                  'Property',
                   'query',
                   'propertyById',
                   {
@@ -179,6 +200,7 @@ testCombinations.forEach(async combination => {
             property: {
               resolve(parent, args, context, info) {
                 return info.mergeInfo.delegate(
+                  'Property',
                   'query',
                   'propertyById',
                   {
@@ -196,6 +218,7 @@ testCombinations.forEach(async combination => {
             },
             delegateInterfaceTest(parent, args, context, info) {
               return info.mergeInfo.delegate(
+                'Property',
                 'query',
                 'interfaceTest',
                 {
@@ -207,6 +230,7 @@ testCombinations.forEach(async combination => {
             },
             delegateArgumentTest(parent, args, context, info) {
               return info.mergeInfo.delegate(
+                'Property',
                 'query',
                 'propertyById',
                 {
@@ -227,6 +251,7 @@ testCombinations.forEach(async combination => {
               resolve(parent, args, context, info) {
                 if (args.id.startsWith('p')) {
                   return info.mergeInfo.delegate(
+                    'Property',
                     'query',
                     'propertyById',
                     args,
@@ -235,6 +260,7 @@ testCombinations.forEach(async combination => {
                   );
                 } else if (args.id.startsWith('b')) {
                   return info.mergeInfo.delegate(
+                    'Booking',
                     'query',
                     'bookingById',
                     args,
@@ -243,6 +269,7 @@ testCombinations.forEach(async combination => {
                   );
                 } else if (args.id.startsWith('c')) {
                   return info.mergeInfo.delegate(
+                    'Booking',
                     'query',
                     'customerById',
                     args,
@@ -256,6 +283,7 @@ testCombinations.forEach(async combination => {
             },
             async nodes(parent, args, context, info) {
               const bookings = await info.mergeInfo.delegate(
+                'Booking',
                 'query',
                 'bookings',
                 {},
@@ -263,6 +291,7 @@ testCombinations.forEach(async combination => {
                 info,
               );
               const properties = await info.mergeInfo.delegate(
+                'Property',
                 'query',
                 'properties',
                 {},
@@ -1782,6 +1811,121 @@ bookingById(id: $b1) {
             },
           },
         });
+      });
+    });
+  });
+});
+
+describe('mergeSchema options', () => {
+  describe('should filter types', () => {
+    let schema: GraphQLSchema;
+
+    before(async () => {
+      const bookingSchema = await remoteBookingSchema;
+      const createTypeFilteringVisitTypes = (
+        typeNames: Array<string>,
+      ): VisitType => {
+        return (name, candidates) => {
+          if (
+            ['ID', 'String', 'DateTime'].includes(name) ||
+            typeNames.includes(name)
+          ) {
+            return candidates[candidates.length - 1].type;
+          } else {
+            return null;
+          }
+        };
+      };
+      schema = mergeSchemas({
+        schemas: [
+          {
+            name: 'Booking',
+            schema: bookingSchema,
+          },
+          {
+            name: 'Selector',
+            schema: `
+                type Query {
+                  bookingById(id: ID!): Booking
+                },
+              `,
+          },
+        ],
+        visitType: createTypeFilteringVisitTypes(['Query', 'Booking']),
+        resolvers: {
+          Query: {
+            bookingById(parent, args, context, info) {
+              return info.mergeInfo.delegate(
+                'Booking',
+                'query',
+                'bookingById',
+                args,
+                context,
+                info,
+              );
+            },
+          },
+        },
+      });
+    });
+
+    it('should work normally', async () => {
+      const result = await graphql(
+        schema,
+        `
+          query {
+            bookingById(id: "b1") {
+              id
+              propertyId
+              startTime
+              endTime
+            }
+          }
+        `,
+      );
+
+      expect(result).to.deep.equal({
+        data: {
+          bookingById: {
+            endTime: '2016-06-03',
+            id: 'b1',
+            propertyId: 'p1',
+            startTime: '2016-05-04',
+          },
+        },
+      });
+    });
+
+    it('should error on removed types', async () => {
+      const result = await graphql(
+        schema,
+        `
+          query {
+            bookingById(id: "b1") {
+              id
+              propertyId
+              startTime
+              endTime
+              customer {
+                id
+              }
+            }
+          }
+        `,
+      );
+      expect(result).to.deep.equal({
+        errors: [
+          {
+            locations: [
+              {
+                column: 15,
+                line: 8,
+              },
+            ],
+            message: 'Cannot query field "customer" on type "Booking".',
+            path: undefined,
+          },
+        ],
       });
     });
   });
