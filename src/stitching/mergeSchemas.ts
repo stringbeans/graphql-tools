@@ -56,6 +56,10 @@ export default function mergeSchemas({
   const extensions: Array<DocumentNode> = [];
   const fragments = {};
 
+  if (!resolvers) {
+    resolvers = {};
+  }
+
   if (!visitType) {
     visitType = defaultVisitType;
   }
