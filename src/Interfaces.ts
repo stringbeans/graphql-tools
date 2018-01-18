@@ -142,3 +142,5 @@ export type VisitType = (
 ) => VisitTypeResult;
 
 export type ResolveType<T extends GraphQLType> = (type: T) => T;
+
+export type Operation = 'query' | 'mutation' | 'subscription';

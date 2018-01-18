@@ -37,6 +37,7 @@ import {
 import {
   recreateCompositeType,
   fieldMapToFieldConfigMap,
+  createResolveType,
 } from './schemaRecreation';
 import delegateToSchema from './delegateToSchema';
 import typeFromAST, { GetType } from './typeFromAST';
@@ -238,33 +239,6 @@ export default function mergeSchemas({
   return mergedSchema;
 }
 
-function createResolveType(
-  getType: (name: string, type: GraphQLType) => GraphQLType | null,
-): ResolveType<any> {
-  const resolveType = <T extends GraphQLType>(type: T): T => {
-    if (type instanceof GraphQLList) {
-      const innerType = resolveType(type.ofType);
-      if (innerType === null) {
-        return null;
-      } else {
-        return new GraphQLList(innerType) as T;
-      }
-    } else if (type instanceof GraphQLNonNull) {
-      const innerType = resolveType(type.ofType);
-      if (innerType === null) {
-        return null;
-      } else {
-        return new GraphQLNonNull(innerType) as T;
-      }
-    } else if (isNamedType(type)) {
-      return getType(getNamedType(type).name, type) as T;
-    } else {
-      return type;
-    }
-  };
-  return resolveType;
-}
-
 function createMergeInfo(
   schemas: { [name: string]: GraphQLSchema },
   fragmentReplacements: {
@@ -420,17 +394,11 @@ const defaultVisitType: VisitType = (
       const candidateFields = (candidateType as GraphQLObjectType).getFields();
       fields = { ...fields, ...candidateFields };
       Object.keys(candidateFields).forEach(fieldName => {
-        if (name === 'Subscription') {
-          resolvers[fieldName] = {
-            subscribe: candidateFields[fieldName].subscribe,
-          };
-        } else {
-          resolvers[fieldName] = createDelegatingResolver(
-            schemaName,
-            operationName,
-            fieldName,
-          );
-        }
+        resolvers[fieldName] = createDelegatingResolver(
+          schemaName,
+          operationName,
+          fieldName,
+        );
       });
     });
     const type = new GraphQLObjectType({

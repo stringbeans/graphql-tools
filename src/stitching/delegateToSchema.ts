@@ -26,226 +26,322 @@ import {
   visit,
   subscribe,
 } from 'graphql';
+import { Operation } from '../Interfaces';
 import { checkResultAndHandleErrors } from './errors';
+import {
+  Transform,
+  applyDocumentTransforms,
+  applyResultTransforms,
+} from './transforms';
 
 export default async function delegateToSchema(
-  schema: GraphQLSchema,
-  fragmentReplacements: {
-    [typeName: string]: { [fieldName: string]: InlineFragmentNode };
-  },
-  operation: 'query' | 'mutation' | 'subscription',
-  fieldName: string,
+  targetSchema: GraphQLSchema,
+  targetOperation: Operation,
+  targetField: string,
   args: { [key: string]: any },
   context: { [key: string]: any },
   info: GraphQLResolveInfo,
+  transforms: Array<Transform>,
 ): Promise<any> {
-  let type;
-  if (operation === 'mutation') {
-    type = schema.getMutationType();
-  } else if (operation === 'subscription') {
-    type = schema.getSubscriptionType();
-  } else {
-    type = schema.getQueryType();
-  }
-  if (type) {
-    const graphqlDoc: DocumentNode = createDocument(
+  const rawDocument = createDocument(
+    targetField,
+    info.fieldNodes,
+    Object.keys(info.fragments).map(
+      fragmentName => info.fragments[fragmentName],
+    ),
+    info.operation.variableDefinitions,
+  );
+
+  // add variable transform to the end
+  // add filtering transform
+  // add error-checking and unraveling transform
+  // transforms = [
+  //  ...transforms,
+  //  AddArgumentsAsVariablesTransform(args),
+  //  FilterToSchemaTransform(targetSchema),
+  //  CheckResultAndHandleErrorsTransform(info)
+  // ]
+
+  const processedDocument = applyDocumentTrasforms(rawDocument, transforms);
+
+  if (operation === 'query' || operation === 'mutation') {
+    const rawResult = await graphql(
       schema,
-      fragmentReplacements,
-      type,
-      fieldName,
-      operation,
-      info.fieldNodes,
-      info.fragments,
-      info.operation.variableDefinitions,
+      processedDocument,
+      info.rootValue,
+      context,
+      variableValues,
     );
 
-    const operationDefinition = graphqlDoc.definitions.find(
-      ({ kind }) => kind === Kind.OPERATION_DEFINITION,
-    );
-    let variableValues = {};
-    if (
-      operationDefinition &&
-      operationDefinition.kind === Kind.OPERATION_DEFINITION &&
-      operationDefinition.variableDefinitions
-    ) {
-      operationDefinition.variableDefinitions.forEach(definition => {
-        const key = definition.variable.name.value;
-        // (XXX) This is kinda hacky
-        let actualKey = key;
-        if (actualKey.startsWith('_')) {
-          actualKey = actualKey.slice(1);
-        }
-        const value = args[actualKey] || args[key] || info.variableValues[key];
-        variableValues[key] = value;
-      });
-    }
-
-    if (operation === 'query' || operation === 'mutation') {
-      const result = await execute(
-        schema,
-        graphqlDoc,
-        info.rootValue,
-        context,
-        variableValues,
-      );
-      return checkResultAndHandleErrors(result, info, fieldName);
-    }
-
-    if (operation === 'subscription') {
-      return subscribe(
-        schema,
-        graphqlDoc,
-        info.rootValue,
-        context,
-        variableValues,
-      );
-    }
+    const result = applyResultTransforms(rawResult, transforms);
   }
 
-  throw new Error('Could not forward to merged schema');
+  if (operation === 'subscription') {
+    // apply result processing ???
+    return subscribe(
+      schema,
+      processedDocument,
+      info.rootValue,
+      context,
+      variableValues,
+    );
+  }
 }
 
 export function createDocument(
-  schema: GraphQLSchema,
-  fragmentReplacements: {
-    [typeName: string]: { [fieldName: string]: InlineFragmentNode };
-  },
-  type: GraphQLObjectType,
-  rootFieldName: string,
-  operation: 'query' | 'mutation' | 'subscription',
-  selections: Array<FieldNode>,
-  fragments: { [fragmentName: string]: FragmentDefinitionNode },
-  variableDefinitions?: Array<VariableDefinitionNode>,
-): DocumentNode {
-  const rootField = type.getFields()[rootFieldName];
-  const newVariables: Array<{ arg: string; variable: string }> = [];
+  targetField: string,
+  selections: Array<SelectionNode>,
+  fragments: Array<FragmentDefinitionNode>,
+  variables: Array<VarriableDefinitionNode>,
+) {
+  const originalSelection = selections[0];
   const rootSelectionSet = {
     kind: Kind.SELECTION_SET,
-    // (XXX) This (wrongly) assumes only having one fieldNode
-    selections: selections.map(selection => {
-      if (selection.kind === Kind.FIELD) {
-        const { selection: newSelection, variables } = processRootField(
-          selection,
-          rootFieldName,
-          rootField,
-        );
-        newVariables.push(...variables);
-        return newSelection;
-      } else {
-        return selection;
-      }
-    }),
-  };
-
-  const newVariableDefinitions = newVariables.map(({ arg, variable }) => {
-    const argDef = rootField.args.find(rootArg => rootArg.name === arg);
-    if (!argDef) {
-      throw new Error('Unexpected missing arg');
-    }
-    const typeName = typeToAst(argDef.type);
-    return {
-      kind: Kind.VARIABLE_DEFINITION,
-      variable: {
-        kind: Kind.VARIABLE,
-        name: {
-          kind: Kind.NAME,
-          value: variable,
-        },
-      },
-      type: typeName,
-    };
-  });
-
-  const {
-    selectionSet,
-    fragments: processedFragments,
-    usedVariables,
-  } = filterSelectionSetDeep(
-    schema,
-    fragmentReplacements,
-    type,
-    rootSelectionSet,
-    fragments,
-  );
-
-  const operationDefinition: OperationDefinitionNode = {
-    kind: Kind.OPERATION_DEFINITION,
-    operation,
-    variableDefinitions: [
-      ...(variableDefinitions || []).filter(
-        variableDefinition =>
-          usedVariables.indexOf(variableDefinition.variable.name.value) !== -1,
-      ),
-      ...newVariableDefinitions,
-    ],
-    selectionSet,
-  };
-
-  const newDoc: DocumentNode = {
-    kind: Kind.DOCUMENT,
-    definitions: [operationDefinition, ...processedFragments],
-  };
-
-  return newDoc;
-}
-
-function processRootField(
-  selection: FieldNode,
-  rootFieldName: string,
-  rootField: GraphQLField<any, any>,
-): {
-  selection: FieldNode;
-  variables: Array<{ arg: string; variable: string }>;
-} {
-  const existingArguments = selection.arguments || [];
-  const existingArgumentNames = existingArguments.map(arg => arg.name.value);
-  const allowedArguments = rootField.args.map(arg => arg.name);
-  const missingArgumentNames = difference(
-    allowedArguments,
-    existingArgumentNames,
-  );
-  const extraArguments = difference(existingArgumentNames, allowedArguments);
-  const filteredExistingArguments = existingArguments.filter(
-    arg => extraArguments.indexOf(arg.name.value) === -1,
-  );
-  const variables: Array<{ arg: string; variable: string }> = [];
-  const missingArguments = missingArgumentNames.map(name => {
-    // (XXX): really needs better var generation
-    const variableName = `_${name}`;
-    variables.push({
-      arg: name,
-      variable: variableName,
-    });
-    return {
-      kind: Kind.ARGUMENT,
-      name: {
-        kind: Kind.NAME,
-        value: name,
-      },
-      value: {
-        kind: Kind.VARIABLE,
-        name: {
-          kind: Kind.NAME,
-          value: variableName,
-        },
-      },
-    };
-  });
-
-  return {
-    selection: {
+    selections: {
       kind: Kind.FIELD,
       alias: null,
-      arguments: [...filteredExistingArguments, ...missingArguments],
-      selectionSet: selection.selectionSet,
+      arguments: originalSelection.arguments,
+      selectionSet: originalSelection.selectionSet,
       name: {
         kind: Kind.NAME,
-        value: rootFieldName,
+        value: targetField,
       },
     },
-    variables,
+  };
+
+  const operationDefinition = {
+    kind: Kind.OPERATION_DEFINITION,
+    operation,
+    variableDefinitions: variableDefinitions,
+    selectionSet: rootSelectionSet,
+  };
+
+  return {
+    kind: Kind.DOCUMENT,
+    operations: [operation, ...fragments],
   };
 }
+
+//
+// export default async function delegateToSchema(
+//   schema: GraphQLSchema,
+//   fragmentReplacements: {
+//     [typeName: string]: { [fieldName: string]: InlineFragmentNode };
+//   },
+//   operation: 'query' | 'mutation' | 'subscription',
+//   fieldName: string,
+//   args: { [key: string]: any },
+//   context: { [key: string]: any },
+//   info: GraphQLResolveInfo,
+// ): Promise<any> {
+//   let type;
+//   if (operation === 'mutation') {
+//     type = schema.getMutationType();
+//   } else if (operation === 'subscription') {
+//     type = schema.getSubscriptionType();
+//   } else {
+//     type = schema.getQueryType();
+//   }
+//   if (type) {
+//     const graphqlDoc: DocumentNode = createDocument(
+//       schema,
+//       fragmentReplacements,
+//       type,
+//       fieldName,
+//       operation,
+//       info.fieldNodes,
+//       info.fragments,
+//       info.operation.variableDefinitions,
+//     );
+//
+//     const operationDefinition = graphqlDoc.definitions.find(
+//       ({ kind }) => kind === Kind.OPERATION_DEFINITION,
+//     );
+//     let variableValues = {};
+//     if (
+//       operationDefinition &&
+//       operationDefinition.kind === Kind.OPERATION_DEFINITION &&
+//       operationDefinition.variableDefinitions
+//     ) {
+//       operationDefinition.variableDefinitions.forEach(definition => {
+//         const key = definition.variable.name.value;
+//         // (XXX) This is kinda hacky
+//         let actualKey = key;
+//         if (actualKey.startsWith('_')) {
+//           actualKey = actualKey.slice(1);
+//         }
+//         const value = args[actualKey] || args[key] || info.variableValues[key];
+//         variableValues[key] = value;
+//       });
+//     }
+//
+//     if (operation === 'query' || operation === 'mutation') {
+//       const result = await execute(
+//         schema,
+//         graphqlDoc,
+//         info.rootValue,
+//         context,
+//         variableValues,
+//       );
+//       return checkResultAndHandleErrors(result, info, fieldName);
+//     }
+//
+//     if (operation === 'subscription') {
+//       return subscribe(
+//         schema,
+//         graphqlDoc,
+//         info.rootValue,
+//         context,
+//         variableValues,
+//       );
+//     }
+//   }
+//
+//   throw new Error('Could not forward to merged schema');
+// }
+//
+// export function createDocument(
+//   schema: GraphQLSchema,
+//   fragmentReplacements: {
+//     [typeName: string]: { [fieldName: string]: InlineFragmentNode };
+//   },
+//   type: GraphQLObjectType,
+//   rootFieldName: string,
+//   operation: 'query' | 'mutation' | 'subscription',
+//   selections: Array<FieldNode>,
+//   fragments: { [fragmentName: string]: FragmentDefinitionNode },
+//   variableDefinitions?: Array<VariableDefinitionNode>,
+// ): DocumentNode {
+//   const rootField = type.getFields()[rootFieldName];
+//   const newVariables: Array<{ arg: string; variable: string }> = [];
+//   const rootSelectionSet = {
+//     kind: Kind.SELECTION_SET,
+//     // (XXX) This (wrongly) assumes only having one fieldNode
+//     selections: selections.map(selection => {
+//       if (selection.kind === Kind.FIELD) {
+//         const { selection: newSelection, variables } = processRootField(
+//           selection,
+//           rootFieldName,
+//           rootField,
+//         );
+//         newVariables.push(...variables);
+//         return newSelection;
+//       } else {
+//         return selection;
+//       }
+//     }),
+//   };
+//
+//   const newVariableDefinitions = newVariables.map(({ arg, variable }) => {
+//     const argDef =No such planets in the game at this time. They have been consumed by the mists of time, and the Marauders themselves are unlikely to remember their origins at this point...
+//  rootField.args.find(rootArg => rootArg.name === arg);
+//     if (!argDef) {
+//       throw new Error('Unexpected missing arg');
+//     }
+//     const typeName = typeToAst(argDef.type);
+//     return {
+//       kind: Kind.VARIABLE_DEFINITION,
+//       variable: {
+//         kind: Kind.VARIABLE,
+//         name: {
+//           kind: Kind.NAME,
+//           value: variable,
+//         },
+//       },
+//       type: typeName,
+//     };
+//   });
+//
+//   const {
+//     selectionSet,
+//     fragments: processedFragments,
+//     usedVariables,
+//   } = filterSelectionSetDeep(
+//     schema,
+//     fragmentReplacements,
+//     type,
+//     rootSelectionSet,
+//     fragments,
+//   );
+//
+//   const operationDefinition: OperationDefinitionNode = {
+//     kind: Kind.OPERATION_DEFINITION,
+//     operation,
+//     variableDefinitions: [
+//       ...(variableDefinitions || []).filter(
+//         variableDefinition =>
+//           usedVariables.indexOf(variableDefinition.variable.name.value) !== -1,
+//       ),
+//       ...newVariableDefinitions,
+//     ],
+//     selectionSet,
+//   };
+//
+//   const newDoc: DocumentNode = {
+//     kind: Kind.DOCUMENT,
+//     definitions: [operationDefinition, ...processedFragments],
+//   };
+//
+//   return newDoc;
+// }
+//
+// function processRootField(
+//   selection: FieldNode,
+//   rootFieldName: string,
+//   rootField: GraphQLField<any, any>,
+// ): {
+//   selection: FieldNode;
+//   variables: Array<{ arg: string; variable: string }>;
+// } {
+//   const existingArguments = selection.arguments || [];
+//   const existingArgumentNames = existingArguments.map(arg => arg.name.value);
+//   const allowedArguments = rootField.args.map(arg => arg.name);
+//   const missingArgumentNames = difference(
+//     allowedArguments,
+//     existingArgumentNames,
+//   );
+//   const extraArguments = difference(existingArgumentNames, allowedArguments);
+//   const filteredExistingArguments = existingArguments.filter(
+//     arg => extraArguments.indexOf(arg.name.value) === -1,
+//   );
+//   const variables: Array<{ arg: string; variable: string }> = [];
+//   const missingArguments = missingArgumentNames.map(name => {
+//     // (XXX): really needs better var generation
+//     const variableName = `_${name}`;
+//     variables.push({
+//       arg: name,
+//       variable: variableName,
+//     });
+//     return {
+//       kind: Kind.ARGUMENT,
+//       name: {
+//         kind: Kind.NAME,
+//         value: name,
+//       },
+//       value: {
+//         kind: Kind.VARIABLE,
+//         name: {
+//           kind: Kind.NAME,
+//           value: variableName,
+//         },
+//       },
+//     };
+//   });
+//
+//   return {
+//     selection: {
+//       kind: Kind.FIELD,
+//       alias: null,
+//       arguments: [...filteredExistingArguments, ...missingArguments],
+//       selectionSet: selection.selectionSet,
+//       name: {
+//         kind: Kind.NAME,
+//         value: rootFieldName,
+//       },
+//     },
+//     variables,
+//   };
+// }
 
 function filterSelectionSetDeep(
   schema: GraphQLSchema,

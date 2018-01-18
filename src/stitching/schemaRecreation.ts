@@ -79,6 +79,33 @@ export function fieldMapToFieldConfigMap(
   return result;
 }
 
+export function createResolveType(
+  getType: (name: string, type: GraphQLType) => GraphQLType | null,
+): ResolveType<any> {
+  const resolveType = <T extends GraphQLType>(type: T): T => {
+    if (type instanceof GraphQLList) {
+      const innerType = resolveType(type.ofType);
+      if (innerType === null) {
+        return null;
+      } else {
+        return new GraphQLList(innerType) as T;
+      }
+    } else if (type instanceof GraphQLNonNull) {
+      const innerType = resolveType(type.ofType);
+      if (innerType === null) {
+        return null;
+      } else {
+        return new GraphQLNonNull(innerType) as T;
+      }
+    } else if (isNamedType(type)) {
+      return getType(getNamedType(type).name, type) as T;
+    } else {
+      return type;
+    }
+  };
+  return resolveType;
+}
+
 function fieldToFieldConfig(
   field: GraphQLField<any, any>,
   resolveType: ResolveType<any>,
