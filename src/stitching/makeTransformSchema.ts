@@ -1,17 +1,18 @@
 import {
-  GraphQLSchema,
-  Document,
-  isCompositeType,
+  GraphQLFieldResolver,
   GraphQLInputObjectType,
-  getNamedType,
+  GraphQLNamedType,
   GraphQLObjectType,
+  GraphQLSchema,
   GraphQLType,
+  getNamedType,
+  isCompositeType,
 } from 'graphql';
 import { addResolveFunctionsToSchema } from '../schemaGenerator';
 import { recreateCompositeType, createResolveType } from './schemaRecreation';
-import { IResolvers, IFieldResolver, Operation } from '../Interfaces';
-import delegateFromSchema from './delegateToSchema';
-import { Transform, applySchemaTransfroms } from './transforms';
+import { IResolvers, Operation } from '../Interfaces';
+import delegateToSchema from './delegateToSchema';
+import { Transform, applySchemaTransforms } from './transforms';
 
 export default function makeTransformSchema(
   schema: GraphQLSchema,
@@ -19,7 +20,7 @@ export default function makeTransformSchema(
 ): GraphQLSchema {
   const transformedSchema = applySchemaTransforms(schema, transforms);
 
-  const types = {};
+  const types: { [name: string]: GraphQLNamedType } = {};
   const resolveType = createResolveType(name => {
     if (types[name] === undefined) {
       throw new Error(`Can't find type ${name}.`);
@@ -58,8 +59,8 @@ export default function makeTransformSchema(
 }
 
 function createProxyingResolvers(
-  targetchema: GraphQLSchema,
-  transforms: Array<Transforms>,
+  targetSchema: GraphQLSchema,
+  transforms: Array<Transform>,
   {
     query,
     mutation,
@@ -108,7 +109,7 @@ function createProxyingResolvers(
     });
   }
 
-  return IResolvers;
+  return resolvers;
 }
 
 function createProxyingResolver(
@@ -116,13 +117,13 @@ function createProxyingResolver(
   targetOperation: Operation,
   targetField: string,
   transforms: Array<Transform>,
-): IFieldResolver {
+): GraphQLFieldResolver<any, any> {
   return (parent, args, context, info) =>
     delegateToSchema(
       targetSchema,
       targetOperation,
       targetField,
-      args,
+      {},
       context,
       info,
       transforms,

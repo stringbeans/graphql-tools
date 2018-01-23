@@ -1,9 +1,8 @@
-import { GraphQLSchema, Document } from 'graphql';
-import { Operation } from '../Interfaces';
+import { GraphQLSchema, DocumentNode } from 'graphql';
 
 export type Transform = {
   transformSchema?: (schema: GraphQLSchema) => GraphQLSchema;
-  transformDocument?: (originalDocument: Document) => Document;
+  transformDocument?: (originalDocument: DocumentNode) => DocumentNode;
   transformResult?: (result: any) => any;
 };
 
@@ -12,18 +11,18 @@ export function applySchemaTransforms(
   transforms: Array<Transform>,
 ): GraphQLSchema {
   return transforms.reduce(
-    (schema: GraphQLSchema, transform: Trasform) =>
+    (schema: GraphQLSchema, transform: Transform) =>
       transform.transformSchema ? transform.transformSchema(schema) : schema,
     originalSchema,
   );
 }
 
 export function applyDocumentTransforms(
-  originalDocument: Document,
+  originalDocument: DocumentNode,
   transforms: Array<Transform>,
-): Document {
+): DocumentNode {
   return transforms.reduce(
-    (document: Document, transform: Trasform) =>
+    (document: DocumentNode, transform: Transform) =>
       transform.transformDocument
         ? transform.transformDocument(document)
         : document,
@@ -32,12 +31,12 @@ export function applyDocumentTransforms(
   );
 }
 
-export function applyResultTransform(
+export function applyResultTransforms(
   originalResult: any,
   transforms: Array<Transform>,
 ): any {
   return transforms.reduce(
-    (result: any, transform: Trasform) =>
+    (result: any, transform: Transform) =>
       transform.transformResult ? transform.transformResult(result) : result,
     originalResult,
   );

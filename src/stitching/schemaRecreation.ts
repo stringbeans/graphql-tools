@@ -13,8 +13,13 @@ import {
   GraphQLInputFieldMap,
   GraphQLInputObjectType,
   GraphQLInterfaceType,
+  GraphQLList,
+  GraphQLNonNull,
   GraphQLObjectType,
+  GraphQLType,
   GraphQLUnionType,
+  getNamedType,
+  isNamedType,
 } from 'graphql';
 import { ResolveType } from '../Interfaces';
 import resolveFromParentTypename from './resolveFromParentTypename';

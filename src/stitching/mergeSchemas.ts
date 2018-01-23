@@ -9,8 +9,6 @@ import {
   GraphQLSchema,
   GraphQLType,
   GraphQLString,
-  GraphQLNonNull,
-  GraphQLList,
   extendSchema,
   getNamedType,
   isCompositeType,
@@ -28,7 +26,6 @@ import {
   MergeTypeCandidate,
   TypeWithResolvers,
   VisitTypeResult,
-  ResolveType,
 } from '../Interfaces';
 import {
   extractExtensionDefinitions,
@@ -267,12 +264,12 @@ function createMergeInfo(
       }
       return delegateToSchema(
         schema,
-        fragmentReplacements,
         operation,
         fieldName,
         args,
         context,
         info,
+        [],
       );
     },
   };
