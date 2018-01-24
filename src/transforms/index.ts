@@ -1,9 +1,10 @@
-import { GraphQLSchema, DocumentNode } from 'graphql';
+import { GraphQLSchema } from 'graphql';
+import { Request, Result } from '../Interfaces';
 
 export type Transform = {
   transformSchema?: (schema: GraphQLSchema) => GraphQLSchema;
-  transformDocument?: (originalDocument: DocumentNode) => DocumentNode;
-  transformResult?: (result: any) => any;
+  transformRequest?: (originalRequest: Request) => Request;
+  transformResult?: (result: Result) => Result;
 };
 
 export function applySchemaTransforms(
@@ -17,17 +18,17 @@ export function applySchemaTransforms(
   );
 }
 
-export function applyDocumentTransforms(
-  originalDocument: DocumentNode,
+export function applyRequestTransforms(
+  originalRequest: Request,
   transforms: Array<Transform>,
-): DocumentNode {
+): Request {
   return transforms.reduce(
-    (document: DocumentNode, transform: Transform) =>
-      transform.transformDocument
-        ? transform.transformDocument(document)
-        : document,
+    (request: Request, transform: Transform) =>
+      transform.transformRequest
+        ? transform.transformRequest(request)
+        : request,
 
-    originalDocument,
+    originalRequest,
   );
 }
 

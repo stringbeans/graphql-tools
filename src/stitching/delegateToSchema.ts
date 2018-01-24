@@ -2,40 +2,26 @@ import {
   DocumentNode,
   FieldNode,
   FragmentDefinitionNode,
-  FragmentSpreadNode,
-  // GraphQLField,
-  // GraphQLInputType,
-  GraphQLInterfaceType,
-  GraphQLList,
-  GraphQLNamedType,
-  GraphQLNonNull,
-  GraphQLObjectType,
   GraphQLResolveInfo,
   GraphQLSchema,
-  GraphQLType,
-  GraphQLUnionType,
-  InlineFragmentNode,
   Kind,
   OperationDefinitionNode,
   SelectionSetNode,
   SelectionNode,
-  TypeNameMetaFieldDef,
-  // TypeNode,
-  VariableNode,
-  // execute,
-  visit,
   subscribe,
   graphql,
   print,
   VariableDefinitionNode,
 } from 'graphql';
-import { Operation } from '../Interfaces';
-import { checkResultAndHandleErrors } from './errors';
+import { Operation, Request } from '../Interfaces';
 import {
   Transform,
-  applyDocumentTransforms,
+  applyRequestTransforms,
   applyResultTransforms,
-} from './transforms';
+} from '../transforms';
+import AddArgumentsAsVariables from '../transforms/AddArgumentsAsVariables';
+import FilterToSchema from '../transforms/FilterToSchema';
+import CheckResultAndHandleErrors from '../transforms/CheckResultAndHandleErrors';
 
 export default async function delegateToSchema(
   targetSchema: GraphQLSchema,
@@ -56,22 +42,29 @@ export default async function delegateToSchema(
     info.operation.variableDefinitions,
   );
 
+  const rawRequest: Request = {
+    document: rawDocument,
+    variables: info.variableValues as Record<string, any>,
+  };
+
   transforms = [
     ...transforms,
-    // AddArgumentsAsVariablesTransform(args),
-    FilterToSchemaTransform(targetSchema),
-    CheckResultAndHandleErrorsTransform(info),
+    AddArgumentsAsVariables(targetSchema, args),
+    FilterToSchema(targetSchema),
+    CheckResultAndHandleErrors(info),
   ];
 
-  const processedDocument = applyDocumentTransforms(rawDocument, transforms);
+  const processedRequest = applyRequestTransforms(rawRequest, transforms);
+
+  console.log(print(processedRequest.document), processedRequest.variables);
 
   if (targetOperation === 'query' || targetOperation === 'mutation') {
     const rawResult = await graphql(
       targetSchema,
-      print(processedDocument),
+      print(processedRequest.document),
       info.rootValue,
       context,
-      args,
+      processedRequest.variables,
     );
 
     const result = applyResultTransforms(rawResult, transforms);
@@ -82,10 +75,10 @@ export default async function delegateToSchema(
     // apply result processing ???
     return subscribe(
       targetSchema,
-      processedDocument,
+      processedRequest.document,
       info.rootValue,
       context,
-      args,
+      processedRequest.variables,
     );
   }
 }
@@ -124,289 +117,6 @@ export function createDocument(
     kind: Kind.DOCUMENT,
     definitions: [operationDefinition, ...fragments],
   };
-}
-
-function CheckResultAndHandleErrorsTransform(info: GraphQLResolveInfo) {
-  return {
-    transformResult(result: any): any {
-      return checkResultAndHandleErrors(result, info);
-    },
-  };
-}
-
-function FilterToSchemaTransform(targetSchema: GraphQLSchema): Transform {
-  return {
-    transformDocument(document: DocumentNode): DocumentNode {
-      return filterDocumentToSchema(targetSchema, document);
-    },
-  };
-}
-
-function filterDocumentToSchema(
-  targetSchema: GraphQLSchema,
-  document: DocumentNode,
-): DocumentNode {
-  const operations: Array<
-    OperationDefinitionNode
-  > = document.definitions.filter(
-    def => def.kind === Kind.OPERATION_DEFINITION,
-  ) as Array<OperationDefinitionNode>;
-  const fragments: Array<FragmentDefinitionNode> = document.definitions.filter(
-    def => def.kind === Kind.FRAGMENT_DEFINITION,
-  ) as Array<FragmentDefinitionNode>;
-
-  let usedVariables: Array<string> = [];
-  let usedFragments: Array<string> = [];
-  const newOperations: Array<OperationDefinitionNode> = [];
-  let newFragments: Array<FragmentDefinitionNode> = [];
-
-  const validFragments: Array<string> = fragments
-    .filter((fragment: FragmentDefinitionNode) => {
-      const typeName = fragment.typeCondition.name.value;
-      const type = targetSchema.getType(typeName);
-      return Boolean(type);
-    })
-    .map((fragment: FragmentDefinitionNode) => fragment.name.value);
-
-  fragments.forEach((fragment: FragmentDefinitionNode) => {
-    const name = fragment.name.value;
-    const typeName = fragment.typeCondition.name.value;
-    const type = targetSchema.getType(typeName);
-    const {
-      selectionSet,
-      usedFragments: fragmentUsedFragments,
-      usedVariables: fragmentUsedVariables,
-    } = filterSelectionSet(
-      targetSchema,
-      type,
-      validFragments,
-      fragment.selectionSet,
-    );
-    usedFragments = union(usedFragments, fragmentUsedFragments);
-    usedVariables = union(usedVariables, fragmentUsedVariables);
-
-    newFragments.push({
-      kind: Kind.FRAGMENT_DEFINITION,
-      name: {
-        kind: Kind.NAME,
-        value: name,
-      },
-      typeCondition: fragment.typeCondition,
-      selectionSet,
-    });
-  });
-
-  operations.forEach((operation: OperationDefinitionNode) => {
-    let type;
-    if (operation.operation === 'subscription') {
-      type = targetSchema.getSubscriptionType();
-    } else if (operation.operation === 'mutation') {
-      type = targetSchema.getMutationType();
-    } else {
-      type = targetSchema.getQueryType();
-    }
-    const {
-      selectionSet,
-      usedFragments: operationUsedFragments,
-      usedVariables: operationUsedVariables,
-    } = filterSelectionSet(
-      targetSchema,
-      type,
-      validFragments,
-      operation.selectionSet,
-    );
-
-    usedFragments = union(usedFragments, operationUsedFragments);
-    const fullUsedVariables = union(usedVariables, operationUsedVariables);
-
-    const variableDefinitions = operation.variableDefinitions.filter(
-      (variable: VariableDefinitionNode) =>
-        fullUsedVariables.indexOf(variable.variable.name.value) !== -1,
-    );
-
-    newOperations.push({
-      kind: Kind.OPERATION_DEFINITION,
-      operation: operation.operation,
-      name: operation.name,
-      directives: operation.directives,
-      variableDefinitions,
-      selectionSet,
-    });
-  });
-
-  newFragments = newFragments.filter(
-    (fragment: FragmentDefinitionNode) =>
-      usedFragments.indexOf(fragment.name.value) !== -1,
-  );
-
-  return {
-    kind: Kind.DOCUMENT,
-    definitions: [...newOperations, ...newFragments],
-  };
-}
-
-function filterSelectionSet(
-  schema: GraphQLSchema,
-  type: GraphQLType,
-  validFragments: Array<String>,
-  selectionSet: SelectionSetNode,
-) {
-  const usedFragments: Array<string> = [];
-  const usedVariables: Array<string> = [];
-  const typeStack: Array<GraphQLType> = [type];
-
-  const filteredSelectionSet = visit(selectionSet, {
-    [Kind.FIELD]: {
-      enter(node: FieldNode): null | undefined | FieldNode {
-        let parentType: GraphQLNamedType = resolveType(
-          typeStack[typeStack.length - 1],
-        );
-        if (
-          parentType instanceof GraphQLObjectType ||
-          parentType instanceof GraphQLInterfaceType
-        ) {
-          const fields = parentType.getFields();
-          const field =
-            node.name.value === '__typename'
-              ? TypeNameMetaFieldDef
-              : fields[node.name.value];
-          if (!field) {
-            return null;
-          } else {
-            typeStack.push(field.type);
-          }
-        } else if (
-          parentType instanceof GraphQLUnionType &&
-          node.name.value === '__typename'
-        ) {
-          typeStack.push(TypeNameMetaFieldDef.type);
-        }
-      },
-      leave() {
-        typeStack.pop();
-      },
-    },
-    [Kind.FRAGMENT_SPREAD](node: FragmentSpreadNode): null | undefined {
-      if (validFragments.indexOf(node.name.value) !== -1) {
-        usedFragments.push(node.name.value);
-      } else {
-        return null;
-      }
-    },
-    [Kind.INLINE_FRAGMENT]: {
-      enter(node: InlineFragmentNode): null | undefined {
-        if (node.typeCondition) {
-          const innerType = schema.getType(node.typeCondition.name.value);
-          const parentType: GraphQLNamedType = resolveType(
-            typeStack[typeStack.length - 1],
-          );
-          if (implementsAbstractType(parentType, innerType)) {
-            typeStack.push(innerType);
-          } else {
-            return null;
-          }
-        }
-      },
-      leave(node: InlineFragmentNode): null | undefined {
-        if (node.typeCondition) {
-          const innerType = schema.getType(node.typeCondition.name.value);
-          if (innerType) {
-            typeStack.pop();
-          } else {
-            return null;
-          }
-        }
-      },
-    },
-    [Kind.VARIABLE](node: VariableNode) {
-      usedVariables.push(node.name.value);
-    },
-  });
-
-  return {
-    selectionSet: filteredSelectionSet,
-    usedFragments,
-    usedVariables,
-  };
-}
-
-function resolveType(type: GraphQLType): GraphQLNamedType {
-  let lastType = type;
-  while (
-    lastType instanceof GraphQLNonNull ||
-    lastType instanceof GraphQLList
-  ) {
-    lastType = lastType.ofType;
-  }
-  return lastType;
-}
-
-function implementsAbstractType(
-  parent: GraphQLType,
-  child: GraphQLType,
-  bail: boolean = false,
-): boolean {
-  if (parent === child) {
-    return true;
-  } else if (
-    parent instanceof GraphQLInterfaceType &&
-    child instanceof GraphQLObjectType
-  ) {
-    return child.getInterfaces().indexOf(parent) !== -1;
-  } else if (
-    parent instanceof GraphQLUnionType &&
-    child instanceof GraphQLObjectType
-  ) {
-    return parent.getTypes().indexOf(child) !== -1;
-  } else if (parent instanceof GraphQLObjectType && !bail) {
-    return implementsAbstractType(child, parent, true);
-  }
-
-  return false;
-}
-
-// function typeToAst(type: GraphQLInputType): TypeNode {
-//   if (type instanceof GraphQLNonNull) {
-//     const innerType = typeToAst(type.ofType);
-//     if (
-//       innerType.kind === Kind.LIST_TYPE ||
-//       innerType.kind === Kind.NAMED_TYPE
-//     ) {
-//       return {
-//         kind: Kind.NON_NULL_TYPE,
-//         type: innerType,
-//       };
-//     } else {
-//       throw new Error('Incorrent inner non-null type');
-//     }
-//   } else if (type instanceof GraphQLList) {
-//     return {
-//       kind: Kind.LIST_TYPE,
-//       type: typeToAst(type.ofType),
-//     };
-//   } else {
-//     return {
-//       kind: Kind.NAMED_TYPE,
-//       name: {
-//         kind: Kind.NAME,
-//         value: type.toString(),
-//       },
-//     };
-//   }
-// }
-
-function union(...arrays: Array<Array<string>>): Array<string> {
-  const cache: { [key: string]: Boolean } = {};
-  const result: Array<string> = [];
-  arrays.forEach(array => {
-    array.forEach(item => {
-      if (!cache[item]) {
-        cache[item] = true;
-        result.push(item);
-      }
-    });
-  });
-  return result;
 }
 
 // function difference(

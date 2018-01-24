@@ -144,3 +144,13 @@ export type VisitType = (
 export type ResolveType<T extends GraphQLType> = (type: T) => T;
 
 export type Operation = 'query' | 'mutation' | 'subscription';
+
+export type Request = {
+  document: DocumentNode;
+  variables: Record<string, any>;
+  extensions?: Record<string, any>;
+};
+
+export type Result = ExecutionResult & {
+  extensions?: Record<string, any>;
+};

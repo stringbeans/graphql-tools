@@ -12,7 +12,7 @@ import { addResolveFunctionsToSchema } from '../schemaGenerator';
 import { recreateCompositeType, createResolveType } from './schemaRecreation';
 import { IResolvers, Operation } from '../Interfaces';
 import delegateToSchema from './delegateToSchema';
-import { Transform, applySchemaTransforms } from './transforms';
+import { Transform, applySchemaTransforms } from '../transforms';
 
 export default function makeTransformSchema(
   schema: GraphQLSchema,
