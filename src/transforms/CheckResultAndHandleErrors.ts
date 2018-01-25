@@ -4,10 +4,11 @@ import { Transform } from './index';
 
 export default function CheckResultAndHandleErrors(
   info: GraphQLResolveInfo,
+  fieldName?: string,
 ): Transform {
   return {
     transformResult(result: any): any {
-      return checkResultAndHandleErrors(result, info);
+      return checkResultAndHandleErrors(result, info, fieldName);
     },
   };
 }

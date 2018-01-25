@@ -203,7 +203,7 @@ function filterSelectionSet(
           }
         }
       },
-      leave(node: InlineFragmentNode): null | undefined {
+      leave(node: InlineFragmentNode) {
         typeStack.pop();
       },
     },

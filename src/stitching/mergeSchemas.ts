@@ -38,6 +38,7 @@ import {
 } from './schemaRecreation';
 import delegateToSchema from './delegateToSchema';
 import typeFromAST, { GetType } from './typeFromAST';
+import ReplaceFieldWithFragment from '../transforms/ReplaceFieldWithFragment';
 
 export default function mergeSchemas({
   schemas,
@@ -259,6 +260,10 @@ function createMergeInfo(
       info: GraphQLResolveInfo,
     ): any {
       const schema = schemas[schemaName];
+      const fragmentTransform = ReplaceFieldWithFragment(
+        schema,
+        fragmentReplacements,
+      );
       if (!schema) {
         throw new Error(`No subschema named ${schemaName}.`);
       }
@@ -269,7 +274,7 @@ function createMergeInfo(
         args,
         context,
         info,
-        [],
+        [fragmentTransform],
       );
     },
   };

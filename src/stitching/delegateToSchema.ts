@@ -51,12 +51,10 @@ export default async function delegateToSchema(
     ...transforms,
     AddArgumentsAsVariables(targetSchema, args),
     FilterToSchema(targetSchema),
-    CheckResultAndHandleErrors(info),
+    CheckResultAndHandleErrors(info, targetField),
   ];
 
   const processedRequest = applyRequestTransforms(rawRequest, transforms);
-
-  console.log(print(processedRequest.document), processedRequest.variables);
 
   if (targetOperation === 'query' || targetOperation === 'mutation') {
     const rawResult = await graphql(
