@@ -21,6 +21,7 @@ import {
 } from '../transforms';
 import AddArgumentsAsVariables from '../transforms/AddArgumentsAsVariables';
 import FilterToSchema from '../transforms/FilterToSchema';
+import AddTypenameToAbstract from '../transforms/AddTypenameToAbstract';
 import CheckResultAndHandleErrors from '../transforms/CheckResultAndHandleErrors';
 
 export default async function delegateToSchema(
@@ -51,6 +52,7 @@ export default async function delegateToSchema(
     ...transforms,
     AddArgumentsAsVariables(targetSchema, args),
     FilterToSchema(targetSchema),
+    AddTypenameToAbstract(targetSchema),
     CheckResultAndHandleErrors(info, targetField),
   ];
 

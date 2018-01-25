@@ -1,4 +1,5 @@
 import {
+  ArgumentNode,
   DocumentNode,
   FieldNode,
   FragmentDefinitionNode,
@@ -16,9 +17,9 @@ import {
   OperationDefinitionNode,
   SelectionSetNode,
   TypeNameMetaFieldDef,
+  VariableDefinitionNode,
   VariableNode,
   visit,
-  VariableDefinitionNode,
 } from 'graphql';
 import { Request } from '../Interfaces';
 import { Transform } from './index';
@@ -56,15 +57,19 @@ function filterDocumentToSchema(
   const newOperations: Array<OperationDefinitionNode> = [];
   let newFragments: Array<FragmentDefinitionNode> = [];
 
-  const validFragments: Array<string> = fragments
-    .filter((fragment: FragmentDefinitionNode) => {
-      const typeName = fragment.typeCondition.name.value;
-      const type = targetSchema.getType(typeName);
-      return Boolean(type);
-    })
-    .map((fragment: FragmentDefinitionNode) => fragment.name.value);
+  const validFragments: Array<
+    FragmentDefinitionNode
+  > = fragments.filter((fragment: FragmentDefinitionNode) => {
+    const typeName = fragment.typeCondition.name.value;
+    const type = targetSchema.getType(typeName);
+    return Boolean(type);
+  });
 
-  fragments.forEach((fragment: FragmentDefinitionNode) => {
+  const validFragmentNames: Array<string> = validFragments.map(
+    (fragment: FragmentDefinitionNode) => fragment.name.value,
+  );
+
+  validFragments.forEach((fragment: FragmentDefinitionNode) => {
     const name = fragment.name.value;
     const typeName = fragment.typeCondition.name.value;
     const type = targetSchema.getType(typeName);
@@ -75,7 +80,7 @@ function filterDocumentToSchema(
     } = filterSelectionSet(
       targetSchema,
       type,
-      validFragments,
+      validFragmentNames,
       fragment.selectionSet,
     );
     usedFragments = union(usedFragments, fragmentUsedFragments);
@@ -108,7 +113,7 @@ function filterDocumentToSchema(
     } = filterSelectionSet(
       targetSchema,
       type,
-      validFragments,
+      validFragmentNames,
       operation.selectionSet,
     );
 
@@ -170,6 +175,19 @@ function filterSelectionSet(
             return null;
           } else {
             typeStack.push(field.type);
+          }
+
+          const argNames = (field.args || []).map(arg => arg.name);
+          if (node.arguments) {
+            let args = node.arguments.filter((arg: ArgumentNode) => {
+              return argNames.indexOf(arg.name.value) !== -1;
+            });
+            if (args.length !== node.arguments.length) {
+              return {
+                ...node,
+                arguments: args,
+              };
+            }
           }
         } else if (
           parentType instanceof GraphQLUnionType &&
