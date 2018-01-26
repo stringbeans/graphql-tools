@@ -36,6 +36,7 @@ export function recreateCompositeType(
     return new GraphQLObjectType({
       name: type.name,
       description: type.description,
+      astNode: type.astNode,
       fields: () => fieldMapToFieldConfigMap(fields, resolveType),
       interfaces: () => interfaces.map(iface => resolveType(iface)),
     });
@@ -45,6 +46,7 @@ export function recreateCompositeType(
     return new GraphQLInterfaceType({
       name: type.name,
       description: type.description,
+      astNode: type.astNode,
       fields: () => fieldMapToFieldConfigMap(fields, resolveType),
       resolveType: (parent, context, info) =>
         resolveFromParentTypename(parent, info.schema),
@@ -53,6 +55,8 @@ export function recreateCompositeType(
     return new GraphQLUnionType({
       name: type.name,
       description: type.description,
+      astNode: type.astNode,
+
       types: () => type.getTypes().map(unionMember => resolveType(unionMember)),
       resolveType: (parent, context, info) =>
         resolveFromParentTypename(parent, info.schema),
@@ -61,6 +65,8 @@ export function recreateCompositeType(
     return new GraphQLInputObjectType({
       name: type.name,
       description: type.description,
+      astNode: type.astNode,
+
       fields: () =>
         inputFieldMapToFieldConfigMap(type.getFields(), resolveType),
     });
@@ -121,6 +127,7 @@ function fieldToFieldConfig(
     resolve: defaultMergedResolver,
     description: field.description,
     deprecationReason: field.deprecationReason,
+    astNode: field.astNode,
   };
 }
 
@@ -173,5 +180,6 @@ function inputFieldToFieldConfig(
     type: resolveType(field.type),
     defaultValue: field.defaultValue,
     description: field.description,
+    astNode: field.astNode,
   };
 }

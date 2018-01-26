@@ -52,7 +52,7 @@ export type ITypeDefinitions = ITypedef | ITypedef[];
 export type IResolverObject = {
   [key: string]: IFieldResolver<any, any> | IResolverOptions;
 };
-export type IEnumResolver = { [key: string]: string };
+export type IEnumResolver = { [key: string]: string | number };
 export interface IResolvers {
   [key: string]:
     | (() => any)

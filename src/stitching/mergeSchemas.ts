@@ -232,6 +232,13 @@ export default function mergeSchemas({
         return fieldResolver(parent, args, context, newInfo);
       };
     }
+    if (field.subscribe) {
+      const fieldResolver = field.subscribe;
+      field.subscribe = (parent, args, context, info) => {
+        const newInfo = { ...info, mergeInfo };
+        return fieldResolver(parent, args, context, newInfo);
+      };
+    }
   });
 
   return mergedSchema;
@@ -392,15 +399,19 @@ const defaultVisitType: VisitType = (
         break;
     }
     const resolvers = {};
+    const resolverKey =
+      operationName === 'subscription' ? 'subscribe' : 'resolve';
     candidates.forEach(({ type: candidateType, schemaName }) => {
       const candidateFields = (candidateType as GraphQLObjectType).getFields();
       fields = { ...fields, ...candidateFields };
       Object.keys(candidateFields).forEach(fieldName => {
-        resolvers[fieldName] = createDelegatingResolver(
-          schemaName,
-          operationName,
-          fieldName,
-        );
+        resolvers[fieldName] = {
+          [resolverKey]: createDelegatingResolver(
+            schemaName,
+            operationName,
+            fieldName,
+          ),
+        };
       });
     });
     const type = new GraphQLObjectType({
