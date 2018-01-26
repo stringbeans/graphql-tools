@@ -65,9 +65,12 @@ function filterDocumentToSchema(
     return Boolean(type);
   });
 
-  const validFragmentNames: Array<string> = validFragments.map(
-    (fragment: FragmentDefinitionNode) => fragment.name.value,
-  );
+  const validFragmentsWithType: { [name: string]: GraphQLType } = {};
+  validFragments.forEach((fragment: FragmentDefinitionNode) => {
+    const typeName = fragment.typeCondition.name.value;
+    const type = targetSchema.getType(typeName);
+    validFragmentsWithType[fragment.name.value] = type;
+  });
 
   validFragments.forEach((fragment: FragmentDefinitionNode) => {
     const name = fragment.name.value;
@@ -80,7 +83,7 @@ function filterDocumentToSchema(
     } = filterSelectionSet(
       targetSchema,
       type,
-      validFragmentNames,
+      validFragmentsWithType,
       fragment.selectionSet,
     );
     usedFragments = union(usedFragments, fragmentUsedFragments);
@@ -113,7 +116,7 @@ function filterDocumentToSchema(
     } = filterSelectionSet(
       targetSchema,
       type,
-      validFragmentNames,
+      validFragmentsWithType,
       operation.selectionSet,
     );
 
@@ -149,7 +152,7 @@ function filterDocumentToSchema(
 function filterSelectionSet(
   schema: GraphQLSchema,
   type: GraphQLType,
-  validFragments: Array<String>,
+  validFragments: { [name: string]: GraphQLType },
   selectionSet: SelectionSetNode,
 ) {
   const usedFragments: Array<string> = [];
@@ -201,8 +204,17 @@ function filterSelectionSet(
       },
     },
     [Kind.FRAGMENT_SPREAD](node: FragmentSpreadNode): null | undefined {
-      if (validFragments.indexOf(node.name.value) !== -1) {
-        usedFragments.push(node.name.value);
+      if (node.name.value in validFragments) {
+        const parentType: GraphQLNamedType = resolveType(
+          typeStack[typeStack.length - 1],
+        );
+        const innerType = validFragments[node.name.value];
+        if (!implementsAbstractType(parentType, innerType)) {
+          return null;
+        } else {
+          usedFragments.push(node.name.value);
+          return;
+        }
       } else {
         return null;
       }
