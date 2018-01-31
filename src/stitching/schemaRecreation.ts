@@ -1,23 +1,32 @@
 import {
   GraphQLArgument,
   GraphQLArgumentConfig,
-  GraphQLCompositeType,
+  GraphQLBoolean,
+  GraphQLEnumType,
   GraphQLField,
   GraphQLFieldConfig,
   GraphQLFieldConfigArgumentMap,
   GraphQLFieldConfigMap,
   GraphQLFieldMap,
+  GraphQLFloat,
+  GraphQLID,
   GraphQLInputField,
   GraphQLInputFieldConfig,
   GraphQLInputFieldConfigMap,
   GraphQLInputFieldMap,
   GraphQLInputObjectType,
+  GraphQLInt,
   GraphQLInterfaceType,
   GraphQLList,
+  GraphQLNamedType,
   GraphQLNonNull,
   GraphQLObjectType,
+  GraphQLScalarType,
+  GraphQLString,
   GraphQLType,
   GraphQLUnionType,
+  Kind,
+  ValueNode,
   getNamedType,
   isNamedType,
 } from 'graphql';
@@ -25,10 +34,10 @@ import { ResolveType } from '../Interfaces';
 import resolveFromParentTypename from './resolveFromParentTypename';
 import defaultMergedResolver from './defaultMergedResolver';
 
-export function recreateCompositeType(
-  type: GraphQLCompositeType | GraphQLInputObjectType,
+export function recreateType(
+  type: GraphQLNamedType,
   resolveType: ResolveType<any>,
-): GraphQLCompositeType | GraphQLInputObjectType {
+): GraphQLNamedType {
   if (type instanceof GraphQLObjectType) {
     const fields = type.getFields();
     const interfaces = type.getInterfaces();
@@ -70,8 +79,71 @@ export function recreateCompositeType(
       fields: () =>
         inputFieldMapToFieldConfigMap(type.getFields(), resolveType),
     });
+  } else if (type instanceof GraphQLEnumType) {
+    const values = type.getValues();
+    const newValues = {};
+    values.forEach(value => {
+      newValues[value.name] = { value: value.name };
+    });
+    return new GraphQLEnumType({
+      name: type.name,
+      description: type.description,
+      astNode: type.astNode,
+      values: newValues,
+    });
+  } else if (type instanceof GraphQLScalarType) {
+    if (
+      type === GraphQLID ||
+      type === GraphQLString ||
+      type === GraphQLFloat ||
+      type === GraphQLBoolean ||
+      type === GraphQLInt
+    ) {
+      return type;
+    } else {
+      return new GraphQLScalarType({
+        name: type.name,
+        description: type.description,
+        astNode: type.astNode,
+        serialize(value: any) {
+          return value;
+        },
+        parseValue(value: any) {
+          return value;
+        },
+        parseLiteral(ast: ValueNode) {
+          return parseLiteral(ast);
+        },
+      });
+    }
   } else {
     throw new Error(`Invalid type ${type}`);
+  }
+}
+
+function parseLiteral(ast: ValueNode): any {
+  switch (ast.kind) {
+    case Kind.STRING:
+    case Kind.BOOLEAN: {
+      return ast.value;
+    }
+    case Kind.INT:
+    case Kind.FLOAT: {
+      return parseFloat(ast.value);
+    }
+    case Kind.OBJECT: {
+      const value = Object.create(null);
+      ast.fields.forEach(field => {
+        value[field.name.value] = parseLiteral(field.value);
+      });
+
+      return value;
+    }
+    case Kind.LIST: {
+      return ast.values.map(parseLiteral);
+    }
+    default:
+      return null;
   }
 }
 

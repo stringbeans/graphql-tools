@@ -2,21 +2,19 @@ import {
   DocumentNode,
   GraphQLField,
   GraphQLInputObjectType,
+  GraphQLInterfaceType,
   GraphQLNamedType,
   GraphQLObjectType,
   GraphQLResolveInfo,
-  GraphQLInterfaceType,
+  GraphQLScalarType,
   GraphQLSchema,
-  GraphQLType,
   GraphQLString,
-  extendSchema,
-  getNamedType,
-  isCompositeType,
-  isNamedType,
-  parse,
   InlineFragmentNode,
   Kind,
-  GraphQLScalarType,
+  extendSchema,
+  getNamedType,
+  isNamedType,
+  parse,
 } from 'graphql';
 import {
   IResolvers,
@@ -32,7 +30,7 @@ import {
   addResolveFunctionsToSchema,
 } from '../schemaGenerator';
 import {
-  recreateCompositeType,
+  recreateType,
   fieldMapToFieldConfigMap,
   createResolveType,
 } from './schemaRecreation';
@@ -176,13 +174,7 @@ export default function mergeSchemas({
       } else {
         throw new Error('Invalid `visitType` result for type "${typeName}"');
       }
-      let newType: GraphQLType;
-      if (isCompositeType(type) || type instanceof GraphQLInputObjectType) {
-        newType = recreateCompositeType(type, resolveType);
-      } else {
-        newType = getNamedType(type);
-      }
-      types[typeName] = newType;
+      types[typeName] = recreateType(type, resolveType);
       if (typeResolvers) {
         generatedResolvers[typeName] = typeResolvers;
       }

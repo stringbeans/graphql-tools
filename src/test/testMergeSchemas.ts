@@ -4,7 +4,6 @@ import { expect } from 'chai';
 import {
   graphql,
   GraphQLSchema,
-  GraphQLScalarType,
   GraphQLObjectType,
   subscribe,
   parse,
@@ -94,6 +93,26 @@ let enumTest = `
     numericEnum: NumericEnum
   }
 `;
+
+const enumSchema = makeExecutableSchema({
+  typeDefs: enumTest,
+  resolvers: {
+    Color: {
+      RED: '#EA3232',
+    },
+    NumericEnum: {
+      TEST: 1,
+    },
+    Query: {
+      color() {
+        return '#EA3232';
+      },
+      numericEnum() {
+        return 1;
+      },
+    },
+  },
+});
 
 let linkSchema = `
   """
@@ -259,7 +278,7 @@ testCombinations.forEach(async combination => {
           },
           {
             name: 'EnumTest',
-            schema: enumTest,
+            schema: enumSchema,
           },
           {
             name: 'LinkSchema',
@@ -275,19 +294,6 @@ testCombinations.forEach(async combination => {
           },
         ],
         resolvers: {
-          TestScalar: new GraphQLScalarType({
-            name: 'TestScalar',
-            description: undefined,
-            serialize: value => value,
-            parseValue: value => value,
-            parseLiteral: () => null,
-          }),
-          NumericEnum: {
-            TEST: 1,
-          },
-          Color: {
-            RED: '#EA3232',
-          },
           Property: {
             bookings: {
               fragment: 'fragment PropertyFragment on Property { id }',
@@ -340,12 +346,6 @@ testCombinations.forEach(async combination => {
             },
           },
           Query: {
-            color() {
-              return '#EA3232';
-            },
-            numericEnum() {
-              return 1;
-            },
             delegateInterfaceTest(parent, args, context, info) {
               return info.mergeInfo.delegate(
                 'Property',
@@ -509,25 +509,6 @@ testCombinations.forEach(async combination => {
       });
 
       it('works with custom enums', async () => {
-        const enumSchema = makeExecutableSchema({
-          typeDefs: enumTest,
-          resolvers: {
-            Color: {
-              RED: '#EA3232',
-            },
-            NumericEnum: {
-              TEST: 1,
-            },
-            Query: {
-              color() {
-                return '#EA3232';
-              },
-              numericEnum() {
-                return 1;
-              },
-            },
-          },
-        });
         const enumResult = await graphql(
           enumSchema,
           `
@@ -1615,10 +1596,6 @@ bookingById(id: "b1") {
 
     describe('types in schema extensions', () => {
       it('should parse descriptions on new types', () => {
-        // Because we redefine it via `GraphQLScalarType` above, it will get
-        // its description from there.
-        expect(mergedSchema.getType('TestScalar').description).to.be.undefined;
-
         expect(mergedSchema.getType('AnotherNewScalar').description).to.equal(
           'Description of AnotherNewScalar.',
         );

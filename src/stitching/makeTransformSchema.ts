@@ -1,56 +1,25 @@
 import {
   GraphQLFieldResolver,
-  GraphQLInputObjectType,
-  GraphQLNamedType,
   GraphQLObjectType,
   GraphQLSchema,
-  GraphQLType,
-  getNamedType,
-  isCompositeType,
 } from 'graphql';
 import { addResolveFunctionsToSchema } from '../schemaGenerator';
-import { recreateCompositeType, createResolveType } from './schemaRecreation';
 import { IResolvers, Operation } from '../Interfaces';
 import delegateToSchema from './delegateToSchema';
 import { Transform, applySchemaTransforms } from '../transforms';
+import visitSchema from '../transforms/visitSchema';
 
 export default function makeTransformSchema(
   schema: GraphQLSchema,
   transforms: Array<Transform>,
 ): GraphQLSchema {
   const transformedSchema = applySchemaTransforms(schema, transforms);
-
-  const types: { [name: string]: GraphQLNamedType } = {};
-  const resolveType = createResolveType(name => {
-    if (types[name] === undefined) {
-      throw new Error(`Can't find type ${name}.`);
-    }
-    return types[name];
-  });
-
-  const typeMap = transformedSchema.getTypeMap();
-  Object.keys(typeMap).forEach(typeName => {
-    const type = typeMap[typeName];
-    let newType: GraphQLType;
-    if (isCompositeType(type) || type instanceof GraphQLInputObjectType) {
-      newType = recreateCompositeType(type, resolveType);
-    } else {
-      newType = getNamedType(type);
-    }
-    types[typeName] = newType;
-  });
-
-  let finalSchema = new GraphQLSchema({
-    query: types.Query as GraphQLObjectType,
-    mutation: types.Mutation as GraphQLObjectType,
-    subscription: types.Subscription as GraphQLObjectType,
-    types: Object.keys(types).map(key => types[key]),
-  });
+  const finalSchema = visitSchema(transformedSchema, {});
 
   const resolvers = createProxyingResolvers(schema, transforms, {
-    query: types.Query as GraphQLObjectType,
-    mutation: types.Mutation as GraphQLObjectType,
-    subscription: types.Subscription as GraphQLObjectType,
+    query: finalSchema.getQueryType(),
+    mutation: finalSchema.getMutationType(),
+    subscription: finalSchema.getSubscriptionType(),
   });
 
   addResolveFunctionsToSchema(finalSchema, resolvers);
@@ -71,13 +40,12 @@ function createProxyingResolvers(
     subscription?: GraphQLObjectType;
   },
 ): IResolvers {
-  const resolvers: IResolvers = {
-    Query: {},
-    Mutation: {},
-    Subscription: {},
-  };
+  const resolvers: IResolvers = {};
   if (query) {
     Object.keys(query.getFields()).map(fieldName => {
+      if (!resolvers.Query) {
+        resolvers.Query = {};
+      }
       resolvers.Query[fieldName] = createProxyingResolver(
         targetSchema,
         'query',
@@ -89,6 +57,9 @@ function createProxyingResolvers(
 
   if (mutation) {
     Object.keys(mutation.getFields()).map(fieldName => {
+      if (!resolvers.Mutation) {
+        resolvers.Mutation = {};
+      }
       resolvers.Mutation[fieldName] = createProxyingResolver(
         targetSchema,
         'mutation',
@@ -100,6 +71,9 @@ function createProxyingResolvers(
 
   if (subscription) {
     Object.keys(subscription.getFields()).map(fieldName => {
+      if (!resolvers.Subscription) {
+        resolvers.Subscription = {};
+      }
       resolvers.Subscription[fieldName] = createProxyingResolver(
         targetSchema,
         'subscription',
