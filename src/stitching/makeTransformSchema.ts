@@ -7,24 +7,22 @@ import { addResolveFunctionsToSchema } from '../schemaGenerator';
 import { IResolvers, Operation } from '../Interfaces';
 import delegateToSchema from './delegateToSchema';
 import { Transform, applySchemaTransforms } from '../transforms';
-import visitSchema from '../transforms/visitSchema';
 
 export default function makeTransformSchema(
   schema: GraphQLSchema,
   transforms: Array<Transform>,
 ): GraphQLSchema {
   const transformedSchema = applySchemaTransforms(schema, transforms);
-  const finalSchema = visitSchema(transformedSchema, {});
 
   const resolvers = createProxyingResolvers(schema, transforms, {
-    query: finalSchema.getQueryType(),
-    mutation: finalSchema.getMutationType(),
-    subscription: finalSchema.getSubscriptionType(),
+    query: transformedSchema.getQueryType(),
+    mutation: transformedSchema.getMutationType(),
+    subscription: transformedSchema.getSubscriptionType(),
   });
 
-  addResolveFunctionsToSchema(finalSchema, resolvers);
+  addResolveFunctionsToSchema(transformedSchema, resolvers);
 
-  return finalSchema;
+  return transformedSchema;
 }
 
 function createProxyingResolvers(

@@ -58,6 +58,12 @@ function RenameTypes(renameMap: { [originalName: string]: string }): Transform {
   };
 }
 
+// function NamespaceSchema(namespace: string): Transform {
+//   return {
+//     transformSchema();,
+//   };
+// }
+
 describe('transforms', () => {
   describe('rename type', () => {
     let schema: GraphQLSchema;
