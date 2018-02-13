@@ -10,10 +10,14 @@ import {
   graphql,
 } from 'graphql';
 import { Request } from '../Interfaces';
-import { Transform } from '../transforms';
-import makeTransformSchema from '../stitching/makeTransformSchema';
+import { Transform, applySchemaTransforms } from '../transforms';
 import visitSchema, { VisitSchemaKind } from '../transforms/visitSchema';
 import { propertySchema } from './testingSchemas';
+import { addResolveFunctionsToSchema } from '../schemaGenerator';
+import {
+  generateProxyingResolvers,
+  generateSimpleMapping,
+} from '../stitching/resolvers';
 
 function RenameTypes(renameMap: { [originalName: string]: string }): Transform {
   const reverseMap = {};
@@ -68,7 +72,7 @@ describe('transforms', () => {
   describe('rename type', () => {
     let schema: GraphQLSchema;
     before(() => {
-      schema = makeTransformSchema(propertySchema, [
+      const transforms = [
         RenameTypes({
           Property: 'House',
           Location: 'Spots',
@@ -77,7 +81,15 @@ describe('transforms', () => {
           InputWithDefault: 'DefaultingInput',
           TestInterfaceKind: 'TestingInterfaceKinds',
         }),
-      ]);
+      ];
+      schema = applySchemaTransforms(propertySchema, transforms);
+      const mapping = generateSimpleMapping(propertySchema);
+      const resolvers = generateProxyingResolvers(
+        propertySchema,
+        transforms,
+        mapping,
+      );
+      addResolveFunctionsToSchema(schema, resolvers);
     });
     it('should work', async () => {
       const result = await graphql(
